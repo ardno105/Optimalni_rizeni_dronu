@@ -1,4 +1,4 @@
-function model = drone_model2()
+function model = drone_model()
 %DRONE_MODEL2 Summary of this function goes here
 %   Detailed explanation goes here
 addpath('C:\Users\Ondra\VS\bakalarka\CasADi');
@@ -12,8 +12,8 @@ C_M = 5.964552e-3; % rotor torque coefficient
 
 rad_max = (2*pi*64*200)/60; % maximal angular rate of rotor [rad/s]
 rad_min = (2*pi*64*18)/60; % minimal angular rate of rotor [rad/s]
-rpm_max = rad_max*9.5492968;    % [rpm]
-rpm_min = rad_min*9.5492968;    % [rpm]
+% rpm_max = rad_max*9.5492968;    % [rpm]
+% rpm_min = rad_min*9.5492968;    % [rpm]
 arm_length = 0.0397; % arm length
 
 g = 9.81; % gravitational acceleration
@@ -49,6 +49,8 @@ nu = 4;
 X = SX.sym('X', nx, 1);
 U = SX.sym('U', nu, 1);
 
+u_stable = sqrt(g/(C_T*4));
+
 %% Stavy
 x = X(1); % pozice [x, y, z]
 y = X(2);
@@ -63,6 +65,11 @@ p = X(10); % úhlové rychlosti [p, q, r]
 q = X(11);
 r = X(12);
 
+%% Souradny system Zeme
+E = eye(3);
+e1 = E(:,1);
+e2 = E(:,2);
+e3 = E(:,3);
 
 %% Rotacni matice
 % Rotace kolem osy Z (yaw)
@@ -88,8 +95,8 @@ Rot = R_psi * R_theta * R_phi;
 
 %% Translacni dynamika
 Fz = C_T*sum(U.^2);
-d_xyz = transpose(Rot)*[u;v;w];
-acc = [0;0;Fz/m] - Rot*[0;0;g]-cross([p;q;r], [u;v;w]);    % [du;dv;dw]
+d_xyz = [u;v;w];
+acc = -g*e3 + Rot*(Fz*e3)/m;    % [du;dv;dw]
 
 %% Rotacni dynamika
 J = diag([Ix, Iy, Iz]);
@@ -102,17 +109,6 @@ d_phi_theta_psi = [1, sin(phi)*tan(theta), cos(phi)*tan(theta);
                     0, cos(phi), -sin(phi);
                     0, sin(phi)/cos(theta), cos(phi)/cos(theta)]*[p;q;r];
 %% Stavovy popis
-% dX = [d_xyz(1);
-%       d_xyz(2);
-%       d_xyz(3);
-%       acc(1);
-%       acc(2);
-%       acc(3);
-%       ang_acc(1);
-%       ang_acc(2);
-%       ang_acc(3);
-%       d_phi_theta_psi];
-
 dX = [d_xyz(1);
       d_xyz(2);
       d_xyz(3);
@@ -122,20 +118,25 @@ dX = [d_xyz(1);
       ang_acc(1);
       ang_acc(2);
       ang_acc(3);
-      d_phi_theta_psi];
+      d_phi_theta_psi(1);
+      d_phi_theta_psi(2);
+      d_phi_theta_psi(3)
+      ];
 
 %% Omezeni
-lbu = [rad_min; rad_min; rad_min; rad_min];  % input lower bounds
-ubu = [rad_max; rad_max; rad_max; rad_max];  % input upper bounds
+lbu = [rad_min; rad_min; rad_min; rad_min]-u_stable;  % input lower bounds
+ubu = [rad_max; rad_max; rad_max; rad_max]-u_stable;  % input upper bounds
 
 %% Vahove funkce - cost functions
 val_q = 1;
 val_u = 1;
-Q = (1/val_q^2)*eye(nx);    % state cost
-% Q = diag([1;1;1;0.5;0.5;0.5;0.5;0.5;0.5;0.5;0.5;0.5]);
-R = (1/val_u^2)*eye(nu);  % input cost
+% Q = (1/val_q^2)*eye(nx);    % state cost
+Q = diag([1;1;1;0.3;0.3;0.6;1;1;1;0;0;0]);
+% R = (1/val_u^2)*eye(nu);  % input cost
+R = diag([0.3;0.3;0.3;0.3]);
 % generic cost formulation
-xr = [1;1;3;0;0;0;0;0;0;0;0;0]; % reference
+xr = [3;3;3;0;0;0;0;0;0;0;0;0]; % reference
+% xr = [0:3/50:3;0:3/50:3;0:5/50:5;zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51)];
 cost_expr_ext_cost_e = (X-xr)'*Q*(X-xr);  % terminal cost (only states)
 cost_expr_ext_cost = cost_expr_ext_cost_e + U'*R*U;  % stage cost (states and inputs)
 % cost_expr_ext_cost = 1/Ts * cost_expr_ext_cost;  % scale the stage cost to match the discrete formulation
@@ -148,6 +149,7 @@ model.dX = dX;
 model.cost = cost_expr_ext_cost;
 model.lbu = lbu;
 model.ubu = ubu;
-model.xr = xr;  % koncovy stav
+model.xr = xr;
+model.u_stable = u_stable;
 end
 
