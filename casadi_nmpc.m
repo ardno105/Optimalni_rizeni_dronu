@@ -71,8 +71,8 @@ classdef casadi_nmpc < matlab.System & matlab.system.mixin.Propagates
             
             rad_max = (2*pi*64*200)/60; % maximal angular rate of rotor [rad/s]
             rad_min = (2*pi*64*18)/60; % minimal angular rate of rotor [rad/s]
-            % rpm_max = rad_max*9.5492968;    % [rpm]
-            % rpm_min = rad_min*9.5492968;    % [rpm]
+            rpm_max = rad_max*9.5492968;    % [rpm]
+            rpm_min = rad_min*9.5492968;    % [rpm]
             arm_length = 0.0397; % arm length
             
             g = 9.81; % gravitational acceleration
@@ -108,7 +108,7 @@ classdef casadi_nmpc < matlab.System & matlab.system.mixin.Propagates
             U = SX.sym('U', nu, 1);
             xr = SX.sym('xr', nx, 1);
             
-            u_stable = sqrt(g/(C_T*4));
+            u_stable = sqrt(g*m/(C_T*4));
 
             % Stavy
             x = X(1); % pozice [x, y, z]
@@ -183,8 +183,10 @@ classdef casadi_nmpc < matlab.System & matlab.system.mixin.Propagates
                   ];
             
             % Omezeni
-            lbu = [rad_min; rad_min; rad_min; rad_min]-u_stable;  % input lower bounds
-            ubu = [rad_max; rad_max; rad_max; rad_max]-u_stable;  % input upper bounds
+            % lbu = [rad_min; rad_min; rad_min; rad_min]-u_stable;  % input lower bounds
+            % ubu = [rad_max; rad_max; rad_max; rad_max]-u_stable;  % input upper bounds
+            lbu = [rpm_min; rpm_min; rpm_min; rpm_min]-u_stable;  % input lower bounds
+            ubu = [rpm_max; rpm_max; rpm_max; rpm_max]-u_stable;  % input upper bounds
             
             model_init = struct();
             model_init.X = X;
@@ -212,19 +214,24 @@ classdef casadi_nmpc < matlab.System & matlab.system.mixin.Propagates
             import casadi.*
             disp(t)
             tic
+            T = 2; % Casovy horizont
+            N = 6; % Pocet intervalu
+
+            % if(t > 0 && mod(t,(N/T))==0)
+            % 
+            % end
             % w0 = obj.x0;
             % lbw = obj.lbx;
             % ubw = obj.ubx;
             % C_T = obj.F_koef;
             % solver = obj.casadi_solver;
             model = obj.model;
-            xr = [ref; zeros(9,1)];
+            xr = ref;
             C_T = model.F_koef;
             % lbw(1:12) = state;
             % ubw(1:12) = state;
 
-            T = 2; % Casovy horizont
-            N = 6; % Pocet intervalu
+            
             % Pomer T/N = 1/3 vypada celkem dobre
             
             % Promenne
@@ -289,8 +296,8 @@ classdef casadi_nmpc < matlab.System & matlab.system.mixin.Propagates
             % Zavedeni pocatecnich podminek
             Xk = MX.sym('X0', 12);
             w = {w{:}, Xk};
-            lbw = [lbw; state];
-            ubw = [ubw; state];
+            lbw = [lbw; state'];
+            ubw = [ubw; state'];
             % lbw = [lbw; [3;3;3;0;0;0;0;0;0;0;0;0]];
             % ubw = [ubw; [3;3;3;0;0;0;0;0;0;0;0;0]];
             w0 = [w0; zeros(12,1)];
@@ -347,7 +354,7 @@ classdef casadi_nmpc < matlab.System & matlab.system.mixin.Propagates
                        full(sol.x(15));
                        full(sol.x(16))];
             Fz = 3.826e-6*sum(u_input.^2);
-            control = [phi; theta; psi; Fz];
+            control = u_input;
             toc
         end
 
