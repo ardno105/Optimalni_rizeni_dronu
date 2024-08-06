@@ -5,20 +5,21 @@ close all
 addpath('C:\Users\Ondra\VS\bakalarka\CasADi');
 import casadi.*
 
-model = drone_model2();
+model = drone_model();
 
-T = 5; % Casovy horizont
-N = 15; % Pocet intervalu
+T = 0.5; % Casovy horizont
+N = 100; % Pocet intervalu
 % Pomer T/N = 1/3 vypada celkem dobre
 
 % Promenne
 x = model.X;    % Stav
 u = model.U;    % Vstup
+xr_sym = SX.sym('xr', 12,1);
 
 
 %% Generator trajektorie
 % Konecny bod
-XR = [3;3;3];
+XR = [1;1;1];
 x0 = zeros(3,1);
 
 % Omezeni rychlosti a zrychleni
@@ -26,64 +27,82 @@ vel_lim = [-100*ones(3,1), 100*ones(3,1)];
 acc_lim = [-100*ones(3,1), 100*ones(3,1)];
 
 % Body, kterymi chci proletet
-xt = [2;0;2];
+xt = [];
 xr = Trajectory_generator(x0, XR, xt, vel_lim, acc_lim, N);
-xr = [xr;
-      zeros(1,N);
-      zeros(1,N);
-      zeros(1,N);
-      zeros(1,N);
-      zeros(1,N);
-      zeros(1,N);
-      zeros(1,N);
-      zeros(1,N);
-      zeros(1,N);
+xr = [XR;
+      0;
+      0;
+      0;
+      0;
+      0;
+      0;
+      0;
+      0;
+      0;
       ];
+% xr = [xr;
+%       ones(1,N-1), 0;
+%       ones(1,N-1), 0;
+%       ones(1,N-1), 0;
+%       zeros(1,N);
+%       zeros(1,N);
+%       zeros(1,N);
+%       zeros(1,N);
+%       zeros(1,N);
+%       zeros(1,N);
+%       ];
 
 % Rovnice modelu
 xdot = model.dX;
 
 % Objectivni funkce
 Q = diag([1;1;1;0.3;0.3;0.6;1;1;1;0;0;0]);
+% Q = eye(12);
 R = diag([0.3;0.3;0.3;0.3]);
-L = SX.sym('L',N,1);
-for k = 1:N
-    L(k) = (x-xr(:,k))'*Q*(x-xr(:,k)) + u'*R*u;  % stage cost (states and inputs)
-end
+% R = diag([1;1;1;1]);
+% L = SX.sym('L',N,1);
+% for k = 1:N
+%     L(k) = (x-xr(:,k))'*Q*(x-xr(:,k)) + u'*R*u;  % stage cost (states and inputs)
+% end
+L = (x-xr_sym)'*Q*(x-xr_sym) + u'*R*u;
 % L = model.cost;
 
 % Continuous time dynamics
 % f = Function('f', {x, u}, {xdot, L});
 
 % Formulate discrete time dynamics
-F = {};
-if true
-   for k=1:N
-        % CVODES from the SUNDIALS suite
-       dae = struct('x',x,'p',u,'ode',xdot,'quad',L(k));
-       opts = struct('tf',T/N);
-       F{end+1} = integrator('F', 'cvodes', dae, 0, 1/(T/N));
-   end
-   
-else
-   % Fixed step Runge-Kutta 4 integrator
-   M = 4; % RK4 steps per interval
-   DT = T/N/M;
-   f = Function('f', {x, u}, {xdot, L});
-   X0 = MX.sym('X0', 12);
-   U = MX.sym('U',4);
-   X = X0;
-   Q = 0;
-   for j=1:M
-       [k1, k1_q] = f(X, U);
-       [k2, k2_q] = f(X + DT/2 * k1, U);
-       [k3, k3_q] = f(X + DT/2 * k2, U);
-       [k4, k4_q] = f(X + DT * k3, U);
-       X=X+DT/6*(k1 +2*k2 +2*k3 +k4);
-       Q = Q + DT/6*(k1_q + 2*k2_q + 2*k3_q + k4_q);
-    end
-    F = Function('F', {X0, U}, {X, Q}, {'x0','p'}, {'xf', 'qf'});
-end
+% F = {};
+dae = struct('x',x, 'p',[u;xr_sym],'ode',xdot,'quad',L);
+opts = struct('tf',T/N, 'allow_free', true);
+% F = integrator('F', 'cvodes', dae, 0, 1/(T/N));
+F = integrator('F', 'cvodes', dae, 0, T);
+% if true
+%    for k=1:N
+%         % CVODES from the SUNDIALS suite
+       % dae = struct('x',x,'p',u,'ode',xdot,'quad',L);
+       % opts = struct('tf',T/N);
+%        F{end+1} = integrator('F', 'cvodes', dae, 0, 1/(T/N));
+%    end
+% 
+% else
+%    % Fixed step Runge-Kutta 4 integrator
+%    M = 4; % RK4 steps per interval
+%    DT = T/N/M;
+%    f = Function('f', {x, u}, {xdot, L});
+%    X0 = MX.sym('X0', 12);
+%    U = MX.sym('U',4);
+%    X = X0;
+%    Q = 0;
+%    for j=1:M
+%        [k1, k1_q] = f(X, U);
+%        [k2, k2_q] = f(X + DT/2 * k1, U);
+%        [k3, k3_q] = f(X + DT/2 * k2, U);
+%        [k4, k4_q] = f(X + DT * k3, U);
+%        X=X+DT/6*(k1 +2*k2 +2*k3 +k4);
+%        Q = Q + DT/6*(k1_q + 2*k2_q + 2*k3_q + k4_q);
+%     end
+%     F = Function('F', {X0, U}, {X, Q}, {'x0','p'}, {'xf', 'qf'});
+% end
 
 % Inicializace NLP
 w={};
@@ -110,15 +129,21 @@ for k=0:N-1
     Uk = MX.sym(['U_' num2str(k)],4);
     w = {w{:}, Uk};
     % Omezeni vstupu
-    lbw = [lbw; model.u_stable + model.lbu];
-    ubw = [ubw; model.u_stable + model.ubu];
+    % lbw = [lbw; model.u_stable + model.lbu];
+    % ubw = [ubw; model.u_stable + model.ubu];
+    lbw = [lbw; model.lbu];
+    ubw = [ubw; model.ubu];
     w0 = [w0; zeros(4,1)];
+    % w0 = [w0; ones(4,1)*model.u_stable];
 
     % Integrace
-    fcn = F{k+1};
-    Fk = fcn('x0', Xk, 'p', Uk);
+    % fcn = F{k+1};
+    fcn = F;
+    % Fk = fcn('x0', Xk, 'p', [Uk;xr(:,k+1)]);
+    Fk = fcn('x0', Xk, 'p', [Uk;xr]);
     Xk_end = Fk.xf;
     J=J+Fk.qf;
+    % J = substitute(J, xr_sym, xr(:,k+1));
 
     % Novy stav na konci integrace
     Xk = MX.sym(['X_' num2str(k+1)], 12);
@@ -137,23 +162,28 @@ end
 
 % NLP nastaveni
 opts = struct;
-opts.ipopt.max_iter = 200;
+opts.ipopt.max_iter = 10;
 opts.ipopt.acceptable_tol =1e-3;
 opts.ipopt.acceptable_obj_change_tol = 1e-3;
 
 % NLP solver
+% prob = struct('f', J, 'x', vertcat(w{:}), 'g', vertcat(g{:}));
 prob = struct('f', J, 'x', vertcat(w{:}), 'g', vertcat(g{:}));
 solver = nlpsol('solver', 'ipopt', prob, opts);
 
 % Vyres NLP
+% lbw_short = [lbw(1:16); ]
 sol = solver('x0', w0, 'lbx', lbw, 'ubx', ubw,...
             'lbg', lbg, 'ubg', ubg);
 w_opt = full(sol.x);
 
 %% Vykresleni
-xxr = [xr(1,:), xr(1,end)];
-yxr = [xr(2,:), xr(2,end)];
-zxr = [xr(3,:), xr(3,end)];
+% xxr = [xr(1,:), xr(1,end)];
+% yxr = [xr(2,:), xr(2,end)];
+% zxr = [xr(3,:), xr(3,end)];
+xxr = [ones(1,N+1)*xr(1)];
+yxr = [ones(1,N+1)*xr(2)];
+zxr = [ones(1,N+1)*xr(3)];
 
 % Poloha 3D
 figure
@@ -205,4 +235,4 @@ plot(w_opt(15:16:end))
 plot(w_opt(16:16:end))
 title('Vstupy')
 legend('u1', 'u2', 'u3', 'u4')
-xlim([1 N])
+xlim([1 N+1])

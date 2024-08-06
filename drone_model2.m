@@ -1,4 +1,4 @@
-function model = drone_model()
+function model = drone_model2()
 %DRONE_MODEL2 Summary of this function goes here
 %   Detailed explanation goes here
 addpath('C:\Users\Ondra\VS\bakalarka\CasADi');
@@ -12,8 +12,8 @@ C_M = 5.964552e-3; % rotor torque coefficient
 
 rad_max = (2*pi*64*200)/60; % maximal angular rate of rotor [rad/s]
 rad_min = (2*pi*64*18)/60; % minimal angular rate of rotor [rad/s]
-% rpm_max = rad_max*9.5492968;    % [rpm]
-% rpm_min = rad_min*9.5492968;    % [rpm]
+rpm_max = rad_max*9.5492968;    % [rpm]
+rpm_min = rad_min*9.5492968;    % [rpm]
 arm_length = 0.0397; % arm length
 
 g = 9.81; % gravitational acceleration
@@ -49,7 +49,7 @@ nu = 4;
 X = SX.sym('X', nx, 1);
 U = SX.sym('U', nu, 1);
 
-u_stable = sqrt(g/(C_T*4));
+u_stable = sqrt(g*m/(C_T*4));
 
 %% Stavy
 x = X(1); % pozice [x, y, z]
@@ -124,18 +124,22 @@ dX = [d_xyz(1);
       ];
 
 %% Omezeni
-lbu = [rad_min; rad_min; rad_min; rad_min]-u_stable;  % input lower bounds
-ubu = [rad_max; rad_max; rad_max; rad_max]-u_stable;  % input upper bounds
+% lbu = [rad_min; rad_min; rad_min; rad_min]-u_stable;  % input lower bounds
+% ubu = [rad_max; rad_max; rad_max; rad_max]-u_stable;  % input upper bounds
+% lbu = [rad_min; rad_min; rad_min; rad_min];  % input lower bounds
+% ubu = [rad_max; rad_max; rad_max; rad_max];  % input upper bounds
+lbu = [rpm_min; rpm_min; rpm_min; rpm_min];  % input lower bounds
+ubu = [rpm_max; rpm_max; rpm_max; rpm_max];  % input upper bounds
 
 %% Vahove funkce - cost functions
 val_q = 1;
 val_u = 1;
 % Q = (1/val_q^2)*eye(nx);    % state cost
-Q = diag([1;1;1;0.3;0.3;0.6;1;1;1;0;0;0]);
+Q = diag([10;10;10;0.3;0.3;0.6;1;1;1;0;0;0]);
 % R = (1/val_u^2)*eye(nu);  % input cost
-R = diag([0.3;0.3;0.3;0.3]);
+R = diag([0;0;0;0]);
 % generic cost formulation
-xr = [3;3;3;0;0;0;0;0;0;0;0;0]; % reference
+xr = [1;2.5;4;0;0;0;0;0;0;0;0;0]; % reference
 % xr = [0:3/50:3;0:3/50:3;0:5/50:5;zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51);zeros(1,51)];
 cost_expr_ext_cost_e = (X-xr)'*Q*(X-xr);  % terminal cost (only states)
 cost_expr_ext_cost = cost_expr_ext_cost_e + U'*R*U;  % stage cost (states and inputs)
