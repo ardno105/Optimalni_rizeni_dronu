@@ -36,7 +36,8 @@ from gym_pybullet_drones.utils.utils import sync, str2bool
 from mpopt import mp
 import casadi as ca
 
-DEFAULT_DRONES = DroneModel("cf2x")
+DEFAULT_DRONES = DroneModel("cf2p")
+# DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
 DEFAULT_PHYSICS = Physics("pyb")
 # DEFAULT_PHYSICS = Physics("dyn")
@@ -47,7 +48,7 @@ DEFAULT_USER_DEBUG_GUI = False
 DEFAULT_OBSTACLES = True
 DEFAULT_SIMULATION_FREQ_HZ = 240
 DEFAULT_CONTROL_FREQ_HZ = 48   
-# DEFAULT_CONTROL_FREQ_HZ = 20
+# DEFAULT_CONTROL_FREQ_HZ = 60
 DEFAULT_DURATION_SEC = 5
 DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
@@ -93,10 +94,17 @@ def dynamics1(x, u, t):
 
     u = np.sqrt(u/C_T2)
 
+    # CF2X
+    # F = C_T2*(u[0]**2 + u[1]**2 + u[2]**2 + u[3]**2)
+    # tau_phi   = C_T2*(arm_length/np.sqrt(2)) * (u[0]**2 + u[1]**2 - u[2]**2 - u[3]**2)
+    # tau_theta = C_T2*(arm_length/np.sqrt(2)) * (-u[0]**2 + u[1]**2 + u[2]**2 - u[3]**2)
+    # tau_psi   = C_M2 * (u[0]**2 - u[1]**2 + u[2]**2 - u[3]**2)
+
+    # CF2P
     F = C_T2*(u[0]**2 + u[1]**2 + u[2]**2 + u[3]**2)
-    tau_phi   = C_T2*arm_length * (u[3]**2 - u[1]**2)
-    tau_theta = C_T2*arm_length * (u[2]**2 - u[0]**2)
-    tau_psi   = C_M2 * (u[0]**2 - u[1]**2 + u[2]**2 - u[3]**2)
+    tau_phi   = C_T2*(arm_length/np.sqrt(2)) * (u[1]**2 - u[3]**2)
+    tau_theta = C_T2*(arm_length/np.sqrt(2)) * (-u[0]**2 + u[2]**2)
+    tau_psi   = C_M2 * (-u[0]**2 + u[1]**2 - u[2]**2 + u[3]**2)
 
     # Rotace dle Eulerových úhlů
     fx = (F/m) * (ca.cos(phi)*ca.sin(theta)*ca.cos(psi) + ca.sin(phi)*ca.sin(psi))
@@ -141,7 +149,8 @@ def get_dynamics1():
 ocp.dynamics = get_dynamics1()
 
 # Váhové matice Q a R 
-Q = np.diag([100, 100, 100, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+# Q = np.diag([100, 100, 100, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+Q = np.diag([100,100,100, 0.1,0.1,0.1, 10,10,10, 1,1,1])
 R = np.diag([1, 1, 1, 1])
 
 ### Nastavení hodnotící funkce ("let do bodu")
@@ -156,18 +165,31 @@ R = np.diag([1, 1, 1, 1])
 #     return (x_err.T @ Q @ x_err) + (u_err.T @ R @ u_err)
 # ocp.running_costs[0] = running_cost1
 
+# Omezení na cestu
+# V kombinaci letem do bodu
+def path_constrains0(x, u, t):
+    x0 = 0
+    y0 = 2
+    z0 = 0.5
+    return [
+        (0.5+0.3)**2 - (x[0]-x0)*(x[0]-x0) - (x[1]-y0)*(x[1]-y0) - (x[2]-z0)*(x[2]-z0)
+    ]
 
+ocp.path_constraints[0] = path_constrains0
 
 # Časový horizont (3 sekundy)
-ocp.lbtf[0] = 1
-ocp.ubtf[0] = 1
+ocp.lbtf[0] = 3
+ocp.ubtf[0] = 3
 
 # Omezení na stav
-ocp.lbx[0] = np.array([[-np.inf, -np.inf, 0., -np.inf, -np.inf, -np.inf, -np.pi, -np.pi, -np.pi, -np.inf, -np.inf, -np.inf]])
-ocp.ubx[0] = np.array([[np.inf,  np.inf,  np.inf,  np.inf,  np.inf,  np.inf, np.pi,  np.pi,  np.pi,  np.inf,  np.inf,  np.inf]])
+# ocp.lbx[0] = np.array([[-np.inf, -np.inf, 0., -np.inf, -np.inf, -np.inf, -np.pi, -np.pi, -np.pi/2, -np.inf, -np.inf, -np.inf]])
+# ocp.ubx[0] = np.array([[np.inf,  np.inf,  np.inf,  np.inf,  np.inf,  np.inf, np.pi,  np.pi,  np.pi/2,  np.inf,  np.inf,  np.inf]])
 
-# ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.,    -5,-5,-5,    -np.pi/4,-np.pi/4,-np.pi/4,   -2,-2,-2]])
-# ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,   5, 5, 5,     np.pi/4, np.pi/4, np.pi/4,  2,2,2]])
+# ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.,   -np.inf, -np.inf, -np.inf, -30,-30,-30, -np.inf, -np.inf, -np.inf]])
+# ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,  np.inf,  np.inf,  np.inf,  30, 30, 30,  np.inf,  np.inf,  np.inf]])
+
+ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.,    -1,-1,-1,    -np.pi/4,-np.pi/4,-np.pi/2,  -5,-5,-5]])
+ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,   1, 1, 1,     np.pi/4, np.pi/4, np.pi/2,   5, 5, 5]])
 
 def run(
         drone=DEFAULT_DRONES,
@@ -188,9 +210,9 @@ def run(
     H = .1
     H_STEP = .05
     R = .3
-    # INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
+    INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
     # INIT_RPYS = np.array([[0, 0,  i * (np.pi/2)/num_drones] for i in range(num_drones)])
-    INIT_XYZS = np.array([[0,0,0.5]])
+    # INIT_XYZS = np.array([[0,0,1]])
     INIT_RPYS = np.array([[0, 0, 0]])
 
     #### Initialize a circular trajectory ######################
@@ -200,7 +222,8 @@ def run(
     TARGET_POS = np.zeros((NUM_WP,3))
     for i in range(NUM_WP):
         # TARGET_POS[i, :] = R*np.cos((i/NUM_WP)*(2*np.pi)+np.pi/2)+INIT_XYZS[0, 0], R*np.sin((i/NUM_WP)*(2*np.pi)+np.pi/2)-R+INIT_XYZS[0, 1], 0
-        TARGET_POS[i,:] = 0,0,1
+        # TARGET_POS[i, :] = i/NUM_WP,i/NUM_WP,i/NUM_WP
+        TARGET_POS[i,:] = 0,4,0.5
         # if i<control_freq_hz*3: 
         #     TARGET_POS[i, :] = 0,0,i/(control_freq_hz*3)
         # else: TARGET_POS[i, :] = 0,0,1
@@ -243,8 +266,8 @@ def run(
                         )
     
     ### Nastavení počátečních podmínek pro MPC
-    # ocp.x00[0] = np.array([INIT_XYZS[0,0],INIT_XYZS[0,1],INIT_XYZS[0,2],0,0,0,INIT_RPYS[0,0],INIT_RPYS[0,1],INIT_RPYS[0,2],0,0,0])
-    ocp.x00[0] = np.array([0.,0.,0.5, 0.,0.,0., 0.,0.,0., 0.,0.,0.])
+    ocp.x00[0] = np.array([INIT_XYZS[0,0],INIT_XYZS[0,1],INIT_XYZS[0,2],0,0,0,INIT_RPYS[0,0],INIT_RPYS[0,1],INIT_RPYS[0,2],0,0,0])
+    # ocp.x00[0] = np.array([0.,0.,0.5, 0.,0.,0., 0.,0.,0., 0.,0.,0.])
     # ocp.x00[0] = np.zeros([1,12])
 
 
@@ -263,33 +286,36 @@ def run(
         ctrl = [DSLPIDControl(drone_model=drone) for i in range(num_drones)]
 
     #### Run the simulation ####################################
+    pid_action = np.zeros((num_drones,4))
     action = np.zeros((num_drones,4))
 
     ### Počáteční stav cíle
-    x_ref = np.array([0,0,1 ,0,0,0 ,0,0,0 ,0,0,0])
+    x_ref = np.array([TARGET_POS[0,0],TARGET_POS[0,1],INIT_XYZS[0,2] ,0,0,0 ,0,0,0 ,0,0,0])
     # x_ref[0:2] = TARGET_POS[0, 0:2]
     # x_ref[2] = INIT_XYZS[0,2]
 
     # Omezení na vstup
-    ocp.lbu[0] = 0
+    ocp.lbu[0] = 0.0
+    # ocp.ubu[0] = C_T2*(env.MAX_RPM**2)
     # ocp.ubu[0] = 0.15
-    # ocp.ubu[0] = 0.14
-    ocp.ubu[0] = C_T2*(env.MAX_RPM)**2
+    ocp.ubu[0] = 0.10
+    
 
     ### Stabilní vstup - hovering
-    u_stable = C_T2*(env.HOVER_RPM)**2
+    u_stable = C_T2*(env.HOVER_RPM**2)
     u0 = np.array([u_stable, u_stable, u_stable, u_stable])
     # u0 = np.array([0, 0, 0, 0])
     # u0 = np.array([0.073575, 0.073575, 0.073575, 0.073575])
 
     ### Počáteční výpočet MPC
     # ocp.running_costs[0] = lambda x, u, t: ((x-x_ref).T @ Q @ (x-x_ref) + (u-u0).T @ R @ (u-u0))
+    # mpo, post = mp.solve(ocp, n_segments=2, poly_orders=10, scheme="LGR", plot=False)
     # opt = mp.mpopt(ocp, n_segments=1, poly_orders=10)
     # solution = opt.solve()
     # post = opt.process_results(solution, plot=False,scaling=False ,residual_dx=False)
     # data = post.get_data()
     # inputs = data[1][0]
-    # action[0,:] = inputs/C_T2
+    # action[0,:] = np.sqrt(np.abs(inputs/C_T2))
 
     
     
@@ -305,7 +331,7 @@ def run(
 
         #### Compute control for the current way point #############
         # for j in range(num_drones):
-        #     action[j, :], _, _ = ctrl[j].computeControlFromState(control_timestep=env.CTRL_TIMESTEP,
+        #     pid_action[j, :], _, _ = ctrl[j].computeControlFromState(control_timestep=env.CTRL_TIMESTEP,
         #                                                             state=obs[j],
         #                                                             target_pos=np.hstack([TARGET_POS[wp_counters[j], 0:2], INIT_XYZS[j, 2]]),
         #                                                             # target_pos=INIT_XYZS[j, :] + TARGET_POS[wp_counters[j], :],
@@ -320,44 +346,42 @@ def run(
         
         ### Výpočet MPC ##############################
         # if i%2 == 0:
+        # u0 = pid_action.T
         ocp.running_costs[0] = lambda x, u, t: ((x-x_ref).T @ Q @ (x-x_ref) + (u-u0).T @ R @ (u-u0))
-        # opt = mp.mpopt(ocp, n_segments=1, poly_orders=10)
-        # solution = opt.solve()
-        # post = opt.process_results(solution, plot=False,scaling=False ,residual_dx=False)
         mpo, post = mp.solve(ocp, n_segments=1, poly_orders=10, scheme="LGR", plot=False)
         data = post.get_data()
-        current_state = data[0][0]
-        inputs = data[1][1]
-        # action[0,:] = np.sqrt(inputs/C_T2)
+        current_state = data[0][2]
+        inputs = data[1][0]
         action[0,:] = np.sqrt(np.abs(inputs/C_T2))
+        # action[0,:] = env.HOVER_RPM
 
         # x_ref[0:3] = TARGET_POS[i+1]
         wp_counters[0] = wp_counters[0] + 1 if wp_counters[0] < (NUM_WP-1) else 0
         # x_ref[0:2] = TARGET_POS[wp_counters[0],0:2]
-        # x_ref = np.array([TARGET_POS[wp_counters,0][0], TARGET_POS[wp_counters,1][0],TARGET_POS[wp_counters,2][0], 0,0,0 ,0,0,0 ,0,0,0])
+        x_ref = np.array([TARGET_POS[wp_counters[0],0],TARGET_POS[wp_counters[0],1],TARGET_POS[wp_counters[0],2], 0,0,0 ,0,0,0 ,0,0,0])
         # vx = (TARGET_POS[i,0]-current_state[0])/2
         # vy = (TARGET_POS[i,1]-current_state[1])/2
         # vz = (TARGET_POS[i,2]-current_state[2])/2
         # x_ref = np.array([TARGET_POS[i,0], TARGET_POS[i,1],TARGET_POS[i,2], vx,vy,vz ,0,0,0 ,0,0,0])
-        # x_ref = np.array([0,0,1, 0,0,0, 0,0,0, 0,0,0])
+        # x_ref = np.array([0,0,1, 0,0,0, 0,0,1, 0,0,0])
 
-        # print("cilovy stav: ", x_ref)
-        # print(TARGET_POS[i])
+        print("cilovy stav: ", x_ref)
         print("vstupy: ", action[0,:])
         
-        # x_ref[2] = INIT_XYZS[0,2]
 
         #### Go to the next way point and loop #####################
         # for j in range(num_drones):
         #     wp_counters[j] = wp_counters[j] + 1 if wp_counters[j] < (NUM_WP-1) else 0
-        #     x_ref[0:3] = TARGET_POS[wp_counters[j]]
-        #     x_ref[2] = INIT_XYZS[0,2]
+        #     # x_ref[0:3] = TARGET_POS[wp_counters[j]]
+        #     # x_ref[2] = INIT_XYZS[0,2]
+        #     x_ref = np.array([TARGET_POS[wp_counters[j],0], TARGET_POS[wp_counters[j],1],TARGET_POS[wp_counters[j],2], 0,0,0 ,0,0,0 ,0,0,0])
 
         ### Změna stavu...nové x0 pro další výpočet MPC
         state = env._getDroneStateVector(0)
         new_xyz = state[0:3]
         new_vxvyvz = state[10:13]
         new_phithetapsi = state[7:10]
+        # new_phithetapsi = p.getEulerFromQuaternion(state[3:7])
         new_pqr = state[13:16]
         ocp.x00[0][0:3] = new_xyz
         ocp.x00[0][3:6] = new_vxvyvz
