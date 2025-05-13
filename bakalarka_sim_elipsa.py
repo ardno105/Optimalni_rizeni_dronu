@@ -155,7 +155,8 @@ ocp.dynamics = get_dynamics1()
 
 # Váhové matice Q a R 
 # # Pro elipsu
-Q = np.diag([100, 100, 100, 1,1,1, 10,10,10, 1,1,1])
+Q = np.diag([10,10,10, 1,1,1, 1,1,1, 0.1,0.1,0.1])
+Qf = np.diag([100, 100, 100, 100,100,100, 100,100,100, 100,100,100])
 # Pro let do bodu
 # Q = np.diag([10,10,10, 1,1,1, 10,10,10, 1,1,1])
 R = np.diag([1, 1, 1, 1])
@@ -181,12 +182,12 @@ ocp.ubtf[0] = 5
 # ocp.ubx[0] = np.array([[np.inf,  np.inf,  5,  2,  2,  2, np.pi,  np.pi,  np.pi,  np.inf,  np.inf,  np.inf]])
 
 # Let po spirale
-# ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.1,   -np.inf, -np.inf, -np.inf, -np.pi/2,-np.pi/2,-np.pi/2, -np.inf, -np.inf, -np.inf]])
-# ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,  np.inf,  np.inf,  np.inf,  np.pi/2, np.pi/2, np.pi/2,  np.inf,  np.inf,  np.inf]])
+ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.1,   -np.inf, -np.inf, -np.inf, -np.pi,-np.pi,-np.pi/2, -np.inf, -np.inf, -np.inf]])
+ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,  np.inf,  np.inf,  np.inf,  np.pi, np.pi, np.pi/2,  np.inf,  np.inf,  np.inf]])
 
 # Pro let  do bodu
-ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.1,    -1,-1,-1,    -np.pi/2,-np.pi/2,-np.pi/2,  -np.inf,-np.inf,-np.inf]])
-ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,   1, 1, 1,     np.pi/2, np.pi/2, np.pi/2,    np.inf, np.inf, np.inf]])
+# ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.1,    -1,-1,-1,    -np.pi/2,-np.pi/2,-np.pi/2,  -np.inf,-np.inf,-np.inf]])
+# ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,   1, 1, 1,     np.pi/2, np.pi/2, np.pi/2,    np.inf, np.inf, np.inf]])
 
 def printPointFlight(logger, init_xyz, x_ref,J , duration_sec, segment):
     # Vykresleni stavu
@@ -335,7 +336,7 @@ def printPointFlight(logger, init_xyz, x_ref,J , duration_sec, segment):
     plt.grid(True)
     plt.show()
 
-def printTrajectoryFlight(logger, init_xyz, trajectory, J , duration_sec, segment):
+def printTrajectoryFlight(logger, init_xyz, trajectory, J , duration_sec, segment, elipse_step):
     t_sim = int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)
     t = np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ))
     x = np.linspace(0, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ/segment), int(duration_sec*DEFAULT_CONTROL_FREQ_HZ))
@@ -363,8 +364,8 @@ def printTrajectoryFlight(logger, init_xyz, trajectory, J , duration_sec, segmen
     )
     for i in range(3):
         ax.plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][i])
-    ax.plot(t, np.cos((x-1)/20),color='black', linestyle='--')
-    ax.plot(t, np.sin((x-1)/20),color='black', linestyle='--')
+    ax.plot(t, np.cos((x-10)/elipse_step),color='black', linestyle='--')
+    ax.plot(t, np.sin((x-10)/elipse_step),color='black', linestyle='--')
     # ax.plot(t, np.cos((x-1)/t_sim),color='black', linestyle='--')
     # ax.plot(t, np.sin((x-1)/t_sim),color='black', linestyle='--')
     ax.plot(t, np.linspace(1,2,1200),color='black', linestyle='--')
@@ -438,7 +439,7 @@ def printTrajectoryFlight(logger, init_xyz, trajectory, J , duration_sec, segmen
 
     ax.plot(logger.states[0][0], logger.states[0][1], logger.states[0][2], 'r', linewidth=2)
     ax.plot(init_xyz[0,0],init_xyz[0,1],init_xyz[0,2], color='black', marker='o')
-    ax.plot(np.cos((x-1)/20),np.sin((x-1)/20),np.linspace(1,2,1200), color='black', linestyle='--')
+    ax.plot(np.cos((x-1)/elipse_step),np.sin((x-1)/elipse_step),np.linspace(1,2,1200), color='black', linestyle='--')
     # ax.plot(np.cos((x-1)/t_sim),np.sin((x-1)/t_sim),np.linspace(1,2,1200), color='black', linestyle='--')
     ax.set_xlabel('x [m]', fontsize=18, labelpad=15)
     ax.set_ylabel('y [m]', fontsize=18, labelpad=15)
@@ -684,6 +685,7 @@ def run(
         #     x_ref = np.array([TARGET_POS[wp_counters[j],0], TARGET_POS[wp_counters[j],1],TARGET_POS[wp_counters[j],2], 0,0,0 ,0,0,0 ,0,0,0])
 
         ocp.running_costs[0] = lambda x, u, t: ((x-x_ref).T @ Q @ (x-x_ref) + (u-u0).T @ R @ (u-u0))
+        ocp.terminal_costs[0] = lambda xf, tf, x0, t0: ((xf-x_ref).T @ Qf @ (xf-x_ref))
         mpo, post = mp.solve(ocp, n_segments=1, poly_orders=10, scheme="LGR", plot=False)
         data = post.get_data()
         sol = post.solution
@@ -713,6 +715,7 @@ def run(
         
         # Let po spirale
         x_ref = np.array([np.cos(i/elipse_step),np.sin(i/elipse_step),INIT_XYZS[0,2]+i/120, -np.sin(i/elipse_step)*(1/elipse_step),np.cos(i/elipse_step)*(1/elipse_step),0 ,0,0,0 ,0,0,0])
+        
         # x_ref = np.array([np.cos(i/t_sim),np.sin(i/t_sim),INIT_XYZS[0,2]+i/120, -np.sin(i/t_sim)*(1/t_sim),np.cos(i/t_sim)*(1/t_sim),0 ,0,0,0 ,0,0,0])
         trajectory[i] = [x_ref[0], x_ref[1], x_ref[2]]
 
@@ -791,7 +794,7 @@ def run(
 
     #### Vykreslí simulaci letu po trajektorii
     trajectory = trajectory.T
-    printTrajectoryFlight(logger,INIT_XYZS, trajectory, J, duration_sec, segment)
+    printTrajectoryFlight(logger,INIT_XYZS, trajectory, J, duration_sec, segment, elipse_step)
     
 
 
