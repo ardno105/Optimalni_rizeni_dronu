@@ -45,7 +45,7 @@ from mpl_toolkits.mplot3d import Axes3D
 DEFAULT_DRONES = DroneModel("cf2p")     # Konfigurace dronu
 DEFAULT_NUM_DRONES = 1                  # Počet dronů
 DEFAULT_PHYSICS = Physics("pyb")
-DEFAULT_GUI = True                      # Vizualizace zapnuta
+DEFAULT_GUI = False                      # Vizualizace zapnuta
 DEFAULT_RECORD_VISION = False
 DEFAULT_PLOT = True                     # Grafy výstpů
 DEFAULT_USER_DEBUG_GUI = False
@@ -155,7 +155,7 @@ ocp.dynamics = get_dynamics1()
 
 # Váhové matice Q a R 
 # # Pro elipsu
-Q = np.diag([10,10,10, 1,1,1, 1,1,1, 0.1,0.1,0.1])
+Q = np.diag([100,100,100, 1,1,1, 1,1,1, 0.1,0.1,0.1])
 Qf = np.diag([100, 100, 100, 100,100,100, 100,100,100, 100,100,100])
 # Pro let do bodu
 # Q = np.diag([10,10,10, 1,1,1, 10,10,10, 1,1,1])
