@@ -1,20 +1,3 @@
-"""Script demonstrating the joint use of simulation and control.
-
-The simulation is run by a `CtrlAviary` environment.
-The control is given by the PID implementation in `DSLPIDControl`.
-
-Example
--------
-In a terminal, run as:
-
-    $ python pid.py
-
-Notes
------
-The drones move, at different altitudes, along cicular trajectories 
-in the X-Y plane, around point (0, -.3).
-
-"""
 import os
 import time
 import argparse
@@ -36,20 +19,25 @@ from gym_pybullet_drones.utils.utils import sync, str2bool
 from mpopt import mp
 import casadi as ca
 
-DEFAULT_DRONES = DroneModel("cf2p")
-# DEFAULT_DRONES = DroneModel("cf2x")
-DEFAULT_NUM_DRONES = 1
+### Import pro výpočet interpolace
+from scipy.interpolate import barycentric_interpolate
+
+### 3D vykreslení
+from mpl_toolkits.mplot3d import Axes3D
+
+DEFAULT_DRONES = DroneModel("cf2p")     # Konfigurace dronu
+DEFAULT_NUM_DRONES = 1                  # Počet dronů
 DEFAULT_PHYSICS = Physics("pyb")
-# DEFAULT_PHYSICS = Physics("dyn")
-DEFAULT_GUI = True
+DEFAULT_GUI = True                      # Vizualizace zapnuta
 DEFAULT_RECORD_VISION = False
-DEFAULT_PLOT = True
+DEFAULT_PLOT = True                     # Grafy výstpů
 DEFAULT_USER_DEBUG_GUI = False
-DEFAULT_OBSTACLES = True
-DEFAULT_SIMULATION_FREQ_HZ = 240
-DEFAULT_CONTROL_FREQ_HZ = 48   
-# DEFAULT_CONTROL_FREQ_HZ = 60
-DEFAULT_DURATION_SEC = 5
+DEFAULT_OBSTACLES = True                # Překážky
+# DEFAULT_SIMULATION_FREQ_HZ = 240
+DEFAULT_SIMULATION_FREQ_HZ = 960
+DEFAULT_CONTROL_FREQ_HZ = 120   
+# DEFAULT_CONTROL_FREQ_HZ = 240   
+DEFAULT_DURATION_SEC = 10
 DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
 
@@ -60,7 +48,6 @@ C_T = 1.28192e-8      # koeficient tahu rotoru
 C_M = 5.964552e-3     # koeficient momentu rotoru
 C_T2 = 3.16e-10      # koeficient tahu rotoru pro přepočet na rpm
 C_M2 = 7.94e-12     # koeficient momentu rotoru
-# C_T_test = 1e-5
 f_min = 0
 f_max = 0.15
 arm_length = 0.0397     # délka ramene [m]
@@ -86,19 +73,7 @@ def dynamics1(x, u, t):
     q     = x[10]
     r     = x[11]
 
-    # Celkový tah a momenty
-    # F = u[0] + u[1] + u[2] + u[3]
-    # tau_phi   = arm_length * (u[3] - u[1])
-    # tau_theta = arm_length * (u[2] - u[0])
-    # tau_psi   = (C_M / C_T) * (u[0] - u[1] + u[2] - u[3])
-
     u = np.sqrt(u/C_T2)
-
-    # CF2X
-    # F = C_T2*(u[0]**2 + u[1]**2 + u[2]**2 + u[3]**2)
-    # tau_phi   = C_T2*(arm_length/np.sqrt(2)) * (u[0]**2 + u[1]**2 - u[2]**2 - u[3]**2)
-    # tau_theta = C_T2*(arm_length/np.sqrt(2)) * (-u[0]**2 + u[1]**2 + u[2]**2 - u[3]**2)
-    # tau_psi   = C_M2 * (u[0]**2 - u[1]**2 + u[2]**2 - u[3]**2)
 
     # CF2P
     F = C_T2*(u[0]**2 + u[1]**2 + u[2]**2 + u[3]**2)
@@ -149,21 +124,12 @@ def get_dynamics1():
 ocp.dynamics = get_dynamics1()
 
 # Váhové matice Q a R 
-# Q = np.diag([100, 100, 100, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
-Q = np.diag([100,100,100, 0.1,0.1,0.1, 10,10,10, 1,1,1])
+# # Pro elipsu
+# Q = np.diag([100, 100, 100, 1,1,1, 10,10,10, 1,1,1])
+# Pro let do bodu
+Q = np.diag([10,10,10, 1,1,1, 10,10,10, 1,1,1])
+Qf = np.diag([100,100,100,   100,100,100,   100,100,100,   100,100,100])
 R = np.diag([1, 1, 1, 1])
-
-### Nastavení hodnotící funkce ("let do bodu")
-# x_ref = np.array([0,0,0,0,0,0,0,0,0,0,0,0])
-# u0 = np.array([0.073575, 0.073575, 0.073575, 0.073575])
-# def running_cost1(x, u, t):
-#     # Odchylka od trajektorie
-#     x_err = x - x_ref
-#     # Odchylka od stabilních vstupů
-#     u_err = u - u0    
-    
-#     return (x_err.T @ Q @ x_err) + (u_err.T @ R @ u_err)
-# ocp.running_costs[0] = running_cost1
 
 # Omezení na cestu
 # V kombinaci letem do bodu
@@ -178,18 +144,301 @@ def path_constrains0(x, u, t):
 ocp.path_constraints[0] = path_constrains0
 
 # Časový horizont (3 sekundy)
-ocp.lbtf[0] = 3
-ocp.ubtf[0] = 3
+ocp.lbtf[0] = 5
+ocp.ubtf[0] = 5
 
 # Omezení na stav
-# ocp.lbx[0] = np.array([[-np.inf, -np.inf, 0., -np.inf, -np.inf, -np.inf, -np.pi, -np.pi, -np.pi/2, -np.inf, -np.inf, -np.inf]])
-# ocp.ubx[0] = np.array([[np.inf,  np.inf,  np.inf,  np.inf,  np.inf,  np.inf, np.pi,  np.pi,  np.pi/2,  np.inf,  np.inf,  np.inf]])
+# ocp.lbx[0] = np.array([[-np.inf, -np.inf, 0.1, -2, -2, -2, -np.pi, -np.pi, -np.pi, -np.inf, -np.inf, -np.inf]])
+# ocp.ubx[0] = np.array([[np.inf,  np.inf,  5,  2,  2,  2, np.pi,  np.pi,  np.pi,  np.inf,  np.inf,  np.inf]])
 
-# ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.,   -np.inf, -np.inf, -np.inf, -30,-30,-30, -np.inf, -np.inf, -np.inf]])
-# ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,  np.inf,  np.inf,  np.inf,  30, 30, 30,  np.inf,  np.inf,  np.inf]])
+# Let po spirale
+# ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.1,   -np.inf, -np.inf, -np.inf, -np.pi/2,-np.pi/2,-np.pi/2, -np.inf, -np.inf, -np.inf]])
+# ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,  np.inf,  np.inf,  np.inf,  np.pi/2, np.pi/2, np.pi/2,  np.inf,  np.inf,  np.inf]])
 
-ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.,    -1,-1,-1,    -np.pi/4,-np.pi/4,-np.pi/2,  -5,-5,-5]])
-ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,   1, 1, 1,     np.pi/4, np.pi/4, np.pi/2,   5, 5, 5]])
+# Pro let  do bodu
+ocp.lbx[0] = np.array([[-np.inf,-np.inf,0.1,    -1,-1,-1,    -np.pi/2,-np.pi/2,-np.pi/2,  -np.inf,-np.inf,-np.inf]])
+ocp.ubx[0] = np.array([[np.inf,np.inf,np.inf,   1, 1, 1,     np.pi/2, np.pi/2, np.pi/2,    np.inf, np.inf, np.inf]])
+
+def printPointFlight(logger, init_xyz, x_ref,J , duration_sec, segment):
+    # Vykresleni stavu
+    # fig, axs = plt.subplots(2,2)
+    plt.rcParams.update({
+        'text.usetex': False,        # aktivuje LaTeX pro text
+        'font.size': 20,
+        'axes.titlesize': 22,
+        'axes.labelsize': 22,
+        # 'xtick.labelsize': 12,
+        # 'ytick.labelsize': 12,
+        'legend.fontsize': 12,
+        # 'font.family': 'serif'      # LaTeX výchozí písmo (např. Computer Modern)
+    })
+
+    fig, ax = plt.subplots(figsize=(6,4))
+    fig.subplots_adjust(
+        left=0.07,   # okraj vlevo
+        right=0.985,  # okraj vpravo
+        bottom=0.1, # spodní okraj
+        top=0.987,    # horní okraj
+        wspace=0.3, # vodorovná mezera mezi subploty
+        hspace=0.4  # svislá mezera mezi subploty
+    )
+    for i in range(3):
+        ax.plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][i])
+        ax.plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), np.ones([int(duration_sec*DEFAULT_CONTROL_FREQ_HZ),1])*x_ref[i],color='black', linestyle='--')
+    ax.grid(True)
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel('Position [m]')
+    ax.legend(['x', '_', 'y', '_','z'])
+
+    fig = plt.figure(figsize=(6,4))
+    fig.subplots_adjust(
+        left=0.086,   # okraj vlevo
+        right=0.987,  # okraj vpravo
+        bottom=0.088, # spodní okraj
+        top=0.98,    # horní okraj
+        wspace=0.204, # vodorovná mezera mezi subploty
+        hspace=0.5  # svislá mezera mezi subploty
+    )
+    gs = fig.add_gridspec(3, hspace=0.5)
+    axs = gs.subplots( sharex=True)
+    for i in range(3):  
+        axs[0].plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][3+i])
+        axs[1].plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][6+i])
+        axs[2].plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][9+i])
+
+        # axs[0].grid(True)
+        axs[0].grid(True)
+        axs[1].grid(True)
+        axs[2].grid(True)
+
+        # axs[0,0].set_xlabel("Time [s]")
+        # axs[0].set_ylabel("Position [m]")
+        # axs[0].legend(["x", "y", "z"])
+
+        # axs[1,0].set_xlabel("Time [s]")
+        axs[0].set_ylabel("Velocity [m/s]", fontsize = 16)
+        axs[0].legend(["u", "v", "w"])
+
+        # axs[0,1].set_xlabel("Time [s]")
+        axs[1].set_ylabel("Orientation [rad]", fontsize = 16)
+        axs[1].legend([r"$\phi$", r"$\theta$", r"$\psi$"])
+
+        axs[2].set_xlabel("Time [s]")
+        axs[2].set_ylabel("Angular velocity [rad/s]", fontsize = 16)
+        axs[2].legend(["p", "q", "r"])  
+    plt.show()
+
+    # 3D vykresleni
+    # Parametry koule
+    r = 0.5  
+    center = np.array([0, 2, 0.5]) 
+    # Sférické souřadnice
+    u = np.linspace(0, 2 * np.pi, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ))
+    v = np.linspace(0, np.pi, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ))
+    # Parametrické rovnice koule se středem
+    x = center[0] + r * np.outer(np.cos(u), np.sin(v))
+    y = center[1] + r * np.outer(np.sin(u), np.sin(v))
+    z = center[2] + r * np.outer(np.ones_like(u), np.cos(v))
+    # Vykreslení
+    fig = plt.figure()
+    plt.rcParams.update({
+        'text.usetex': False,        # aktivuje LaTeX pro text
+        'font.size': 14,
+        'axes.titlesize': 22,
+        'axes.labelsize': 22,
+        # 'xtick.labelsize': 12,
+        # 'ytick.labelsize': 12,
+        'legend.fontsize': 12,
+        # 'font.family': 'serif'      # LaTeX výchozí písmo (např. Computer Modern)
+    })
+    fig.subplots_adjust(
+        left=0.12,   # okraj vlevo
+        right=0.9,  # okraj vpravo
+        bottom=0, # spodní okraj
+        top=1,    # horní okraj
+        wspace=0.2, # vodorovná mezera mezi subploty
+        hspace=0.2  # svislá mezera mezi subploty
+    )
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Průhledná koule
+    ax.plot_surface(x, y, z, color='blue', alpha=0.3, edgecolor='none')
+    ax.plot(logger.states[0][0], logger.states[0][1], logger.states[0][2], 'r', linewidth=2)
+    ax.plot(init_xyz[0,0],init_xyz[0,1],init_xyz[0,2], color='black', marker='o')
+    ax.plot(logger.states[0][0][-1],logger.states[0][1][-1],logger.states[0][2][-1], color='black', marker='x')
+    ax.set_xlabel('x [m]', fontsize=18)
+    ax.set_ylabel('y [m]', fontsize=18)
+    ax.set_zlabel('z [m]', fontsize=18)
+    plt.show()
+
+    # Vykresleni inputu
+    fig = plt.figure()
+    plt.rcParams.update({
+        'text.usetex': False,        # aktivuje LaTeX pro text
+        'font.size': 20,
+        'axes.titlesize': 22,
+        'axes.labelsize': 22,
+        # 'xtick.labelsize': 12,
+        # 'ytick.labelsize': 12,
+        'legend.fontsize': 12,
+        # 'font.family': 'serif'      # LaTeX výchozí písmo (např. Computer Modern)
+    })
+    fig.subplots_adjust(
+        left=0.07,   # okraj vlevo
+        right=0.985,  # okraj vpravo
+        bottom=0.1, # spodní okraj
+        top=0.987,    # horní okraj
+        wspace=0.3, # vodorovná mezera mezi subploty
+        hspace=0.4  # svislá mezera mezi subploty
+    )
+    for i in range(4):
+        plt.plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][12+i])
+    plt.grid(True)
+    plt.ylabel("RPM")
+    plt.xlabel("Time [s]")
+    plt.legend([r"$u_1$", r"$u_2$", r"$u_3$", r"$u_4$"])
+
+    # Vykresleni funkce J
+    fig = plt.figure()
+    plt.plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ/segment)), J)
+    plt.ylabel("J")
+    plt.xlabel("Time [s]")
+    plt.grid(True)
+    plt.show()
+
+def printTrajectoryFlight(logger, init_xyz, trajectory, J , duration_sec, segment):
+    t_sim = int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)
+    t = np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ))
+    x = np.linspace(0, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ/segment), int(duration_sec*DEFAULT_CONTROL_FREQ_HZ))
+    # Vykresleni stavu
+    # fig, axs = plt.subplots(2,2)
+    plt.rcParams.update({
+        'text.usetex': False,        # aktivuje LaTeX pro text
+        'font.size': 20,
+        'axes.titlesize': 22,
+        'axes.labelsize': 22,
+        # 'xtick.labelsize': 12,
+        # 'ytick.labelsize': 12,
+        'legend.fontsize': 12,
+        # 'font.family': 'serif'      # LaTeX výchozí písmo (např. Computer Modern)
+    })
+
+    fig, ax = plt.subplots(figsize=(6,4))
+    fig.subplots_adjust(
+        left=0.07,   # okraj vlevo
+        right=0.985,  # okraj vpravo
+        bottom=0.1, # spodní okraj
+        top=0.987,    # horní okraj
+        wspace=0.3, # vodorovná mezera mezi subploty
+        hspace=0.4  # svislá mezera mezi subploty
+    )
+    for i in range(3):
+        ax.plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][i])
+    ax.plot(t, np.cos((x-1)/20),color='black', linestyle='--')
+    ax.plot(t, np.sin((x-1)/20),color='black', linestyle='--')
+    # ax.plot(t, np.cos((x-1)/t_sim),color='black', linestyle='--')
+    # ax.plot(t, np.sin((x-1)/t_sim),color='black', linestyle='--')
+    ax.plot(t, np.linspace(1,2,1200),color='black', linestyle='--')
+    ax.grid(True)
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel('Position [m]')
+    ax.legend(['x', 'y', 'z', '_','_','_'])
+    plt.show()
+
+    fig = plt.figure(figsize=(6,4))
+    fig.subplots_adjust(
+        left=0.086,   # okraj vlevo
+        right=0.987,  # okraj vpravo
+        bottom=0.088, # spodní okraj
+        top=0.98,    # horní okraj
+        wspace=0.204, # vodorovná mezera mezi subploty
+        hspace=0.5  # svislá mezera mezi subploty
+    )
+    gs = fig.add_gridspec(3, hspace=0.5)
+    axs = gs.subplots( sharex=True)
+    for i in range(3):  
+        axs[0].plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][3+i])
+        axs[1].plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][6+i])
+        axs[2].plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][9+i])
+
+        # axs[0].grid(True)
+        axs[0].grid(True)
+        axs[1].grid(True)
+        axs[2].grid(True)
+
+        # axs[0,0].set_xlabel("Time [s]")
+        # axs[0].set_ylabel("Position [m]")
+        # axs[0].legend(["x", "y", "z"])
+
+        # axs[1,0].set_xlabel("Time [s]")
+        axs[0].set_ylabel("Velocity [m/s]", fontsize = 16)
+        axs[0].legend(["u", "v", "w"])
+
+        # axs[0,1].set_xlabel("Time [s]")
+        axs[1].set_ylabel("Orientation [rad]", fontsize = 16)
+        axs[1].legend([r"$\phi$", r"$\theta$", r"$\psi$"])
+
+        axs[2].set_xlabel("Time [s]")
+        axs[2].set_ylabel("Angular velocity [rad/s]", fontsize = 16)
+        axs[2].legend(["p", "q", "r"])  
+    plt.show()
+
+    # 3D vykresleni
+    # Parametry koule
+    # Vykreslení
+    fig = plt.figure()
+    plt.rcParams.update({
+        'text.usetex': False,        # aktivuje LaTeX pro text
+        'font.size': 14,
+        'axes.titlesize': 22,
+        'axes.labelsize': 22,
+        # 'xtick.labelsize': 12,
+        # 'ytick.labelsize': 12,
+        'legend.fontsize': 12,
+        # 'font.family': 'serif'      # LaTeX výchozí písmo (např. Computer Modern)
+    })
+    fig.subplots_adjust(
+        left=0.12,   # okraj vlevo
+        right=0.9,  # okraj vpravo
+        bottom=0, # spodní okraj
+        top=1,    # horní okraj
+        wspace=0.2, # vodorovná mezera mezi subploty
+        hspace=0.2  # svislá mezera mezi subploty
+    )
+    ax = fig.add_subplot(111, projection='3d')
+
+    ax.plot(logger.states[0][0], logger.states[0][1], logger.states[0][2], 'r', linewidth=2)
+    ax.plot(init_xyz[0,0],init_xyz[0,1],init_xyz[0,2], color='black', marker='o')
+    ax.plot(np.cos((x-1)/20),np.sin((x-1)/20),np.linspace(1,2,1200), color='black', linestyle='--')
+    # ax.plot(np.cos((x-1)/t_sim),np.sin((x-1)/t_sim),np.linspace(1,2,1200), color='black', linestyle='--')
+    ax.set_xlabel('x [m]', fontsize=18, labelpad=15)
+    ax.set_ylabel('y [m]', fontsize=18, labelpad=15)
+    ax.set_zlabel('z [m]', fontsize=18, labelpad=15)
+    # ax.set_zlim(0.8, 1.2)
+    plt.show()
+
+    fig.subplots_adjust(
+        left=0.07,   # okraj vlevo
+        right=0.985,  # okraj vpravo
+        bottom=0.1, # spodní okraj
+        top=0.987,    # horní okraj
+        wspace=0.3, # vodorovná mezera mezi subploty
+        hspace=0.4  # svislá mezera mezi subploty
+    )
+    for i in range(4):
+        plt.plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ)), logger.states[0][12+i])
+    plt.grid(True)
+    plt.ylabel("RPM")
+    plt.xlabel("Time [s]")
+    plt.legend([r"$u_1$", r"$u_2$", r"$u_3$", r"$u_4$"])
+
+    # Vykresleni funkce J
+    fig = plt.figure()
+    plt.plot(np.linspace(0, duration_sec, int(duration_sec*DEFAULT_CONTROL_FREQ_HZ/segment)), J)
+    plt.ylabel("J")
+    plt.xlabel("Time [s]")
+    plt.grid(True)
+    plt.show()
 
 def run(
         drone=DEFAULT_DRONES,
@@ -210,9 +459,14 @@ def run(
     H = .1
     H_STEP = .05
     R = .3
-    INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
+    # INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
     # INIT_RPYS = np.array([[0, 0,  i * (np.pi/2)/num_drones] for i in range(num_drones)])
-    # INIT_XYZS = np.array([[0,0,1]])
+    # Pocatek pro let do bodu
+    INIT_XYZS = np.array([[0,0,0.1]])
+
+    ## Pocatek pro let po spirale
+    # INIT_XYZS = np.array([[1,0,1]])
+
     INIT_RPYS = np.array([[0, 0, 0]])
 
     #### Initialize a circular trajectory ######################
@@ -228,27 +482,6 @@ def run(
         #     TARGET_POS[i, :] = 0,0,i/(control_freq_hz*3)
         # else: TARGET_POS[i, :] = 0,0,1
     wp_counters = np.array([int((i*NUM_WP/6)%NUM_WP) for i in range(num_drones)])
-
-    #### Debug trajectory ######################################
-    #### Uncomment alt. target_pos in .computeControlFromState()
-    # INIT_XYZS = np.array([[.3 * i, 0, .1] for i in range(num_drones)])
-    # INIT_RPYS = np.array([[0, 0,  i * (np.pi/3)/num_drones] for i in range(num_drones)])
-    # NUM_WP = control_freq_hz*15
-    # TARGET_POS = np.zeros((NUM_WP,3))
-    # for i in range(NUM_WP):
-    #     if i < NUM_WP/6:
-    #         TARGET_POS[i, :] = (i*6)/NUM_WP, 0, 0.5*(i*6)/NUM_WP
-    #     elif i < 2 * NUM_WP/6:
-    #         TARGET_POS[i, :] = 1 - ((i-NUM_WP/6)*6)/NUM_WP, 0, 0.5 - 0.5*((i-NUM_WP/6)*6)/NUM_WP
-    #     elif i < 3 * NUM_WP/6:
-    #         TARGET_POS[i, :] = 0, ((i-2*NUM_WP/6)*6)/NUM_WP, 0.5*((i-2*NUM_WP/6)*6)/NUM_WP
-    #     elif i < 4 * NUM_WP/6:
-    #         TARGET_POS[i, :] = 0, 1 - ((i-3*NUM_WP/6)*6)/NUM_WP, 0.5 - 0.5*((i-3*NUM_WP/6)*6)/NUM_WP
-    #     elif i < 5 * NUM_WP/6:
-    #         TARGET_POS[i, :] = ((i-4*NUM_WP/6)*6)/NUM_WP, ((i-4*NUM_WP/6)*6)/NUM_WP, 0.5*((i-4*NUM_WP/6)*6)/NUM_WP
-    #     elif i < 6 * NUM_WP/6:
-    #         TARGET_POS[i, :] = 1 - ((i-5*NUM_WP/6)*6)/NUM_WP, 1 - ((i-5*NUM_WP/6)*6)/NUM_WP, 0.5 - 0.5*((i-5*NUM_WP/6)*6)/NUM_WP
-    # wp_counters = np.array([0 for i in range(num_drones)])
 
     #### Create the environment ################################
     env = CtrlAviary(drone_model=drone,
@@ -290,117 +523,102 @@ def run(
     action = np.zeros((num_drones,4))
 
     ### Počáteční stav cíle
-    x_ref = np.array([TARGET_POS[0,0],TARGET_POS[0,1],INIT_XYZS[0,2] ,0,0,0 ,0,0,0 ,0,0,0])
-    # x_ref[0:2] = TARGET_POS[0, 0:2]
-    # x_ref[2] = INIT_XYZS[0,2]
+    # x_ref = np.array([TARGET_POS[0,0],TARGET_POS[0,1],INIT_XYZS[0,2] ,0,0,0 ,0,0,0 ,0,0,0])
+    x_ref = np.array([INIT_XYZS[0,0],INIT_XYZS[0,1],INIT_XYZS[0,2], 0,0,0, 0,0,0, 0,0,0])
+    trajectory = np.zeros([int(duration_sec*env.CTRL_FREQ), 3])
 
     # Omezení na vstup
     ocp.lbu[0] = 0.0
     # ocp.ubu[0] = C_T2*(env.MAX_RPM**2)
     # ocp.ubu[0] = 0.15
-    ocp.ubu[0] = 0.10
+    ocp.ubu[0] = 0.13
     
 
     ### Stabilní vstup - hovering
     u_stable = C_T2*(env.HOVER_RPM**2)
     u0 = np.array([u_stable, u_stable, u_stable, u_stable])
     # u0 = np.array([0, 0, 0, 0])
-    # u0 = np.array([0.073575, 0.073575, 0.073575, 0.073575])
 
-    ### Počáteční výpočet MPC
-    # ocp.running_costs[0] = lambda x, u, t: ((x-x_ref).T @ Q @ (x-x_ref) + (u-u0).T @ R @ (u-u0))
-    # mpo, post = mp.solve(ocp, n_segments=2, poly_orders=10, scheme="LGR", plot=False)
-    # opt = mp.mpopt(ocp, n_segments=1, poly_orders=10)
-    # solution = opt.solve()
-    # post = opt.process_results(solution, plot=False,scaling=False ,residual_dx=False)
-    # data = post.get_data()
-    # inputs = data[1][0]
-    # action[0,:] = np.sqrt(np.abs(inputs/C_T2))
+    segment = 10
+    time_step = duration_sec/env.PYB_FREQ
+    t_interp = np.linspace(time_step, segment*time_step, segment)
 
-    
+    J = np.zeros([int(duration_sec*env.CTRL_FREQ/segment), 1])
+    elipse_step = 20
+
+    t_sim = int(duration_sec*env.CTRL_FREQ/segment)
     
     START = time.time()
-    for i in range(0, int(duration_sec*env.CTRL_FREQ)):
-
-        #### Make it rain rubber ducks #############################
-        # if i/env.SIM_FREQ>5 and i%10==0 and i/env.SIM_FREQ<10: p.loadURDF("duck_vhacd.urdf", [0+random.gauss(0, 0.3),-0.5+random.gauss(0, 0.3),3], p.getQuaternionFromEuler([random.randint(0,360),random.randint(0,360),random.randint(0,360)]), physicsClientId=PYB_CLIENT)
-
-        #### Step the simulation ###################################
-        obs, reward, terminated, truncated, info = env.step(action)
-        
-
-        #### Compute control for the current way point #############
-        # for j in range(num_drones):
-        #     pid_action[j, :], _, _ = ctrl[j].computeControlFromState(control_timestep=env.CTRL_TIMESTEP,
-        #                                                             state=obs[j],
-        #                                                             target_pos=np.hstack([TARGET_POS[wp_counters[j], 0:2], INIT_XYZS[j, 2]]),
-        #                                                             # target_pos=INIT_XYZS[j, :] + TARGET_POS[wp_counters[j], :],
-        #                                                             target_rpy=INIT_RPYS[j, :]
-        #                                                             )
-            ### Výpočet MPC
-            # mpo, post = mp.solve(ocp, n_segments=1, poly_orders=10, scheme="LGR", plot=False)
-            # data = post.get_data()
-            # inputs = data[1][0]
-            # action[j,:] = inputs/C_T2
-            # action[j, :] = np.array([[20000, 20000, 20000, 20000]])
-        
-        ### Výpočet MPC ##############################
-        # if i%2 == 0:
-        # u0 = pid_action.T
+    for i in range(0, int(duration_sec*env.CTRL_FREQ/segment)):
         ocp.running_costs[0] = lambda x, u, t: ((x-x_ref).T @ Q @ (x-x_ref) + (u-u0).T @ R @ (u-u0))
+        ocp.terminal_costs[0] = lambda xf, tf, x0, t0: ((xf-x_ref).T @ Qf @ (xf-x_ref))
         mpo, post = mp.solve(ocp, n_segments=1, poly_orders=10, scheme="LGR", plot=False)
         data = post.get_data()
+        sol = post.solution
+        J[i] = sol['f']
         current_state = data[0][2]
-        inputs = data[1][0]
-        action[0,:] = np.sqrt(np.abs(inputs/C_T2))
-        # action[0,:] = env.HOVER_RPM
+        t = data[2].T
+        t = t[0]
+        inputs = data[1].T
+        input1 = inputs[0]
+        input2 = inputs[1]
+        input3 = inputs[2]
+        input4 = inputs[3]
+        # Barycentrická interpolace
+        u1 = barycentric_interpolate(t, input1, t_interp)
+        u2 = barycentric_interpolate(t, input2, t_interp)
+        u3 = barycentric_interpolate(t, input3, t_interp)
+        u4 = barycentric_interpolate(t, input4, t_interp)
+        
 
-        # x_ref[0:3] = TARGET_POS[i+1]
+        # action[0,:] = np.sqrt(np.abs(inputs/C_T2))
+
         wp_counters[0] = wp_counters[0] + 1 if wp_counters[0] < (NUM_WP-1) else 0
-        # x_ref[0:2] = TARGET_POS[wp_counters[0],0:2]
+
+        # # Let do bodu
         x_ref = np.array([TARGET_POS[wp_counters[0],0],TARGET_POS[wp_counters[0],1],TARGET_POS[wp_counters[0],2], 0,0,0 ,0,0,0 ,0,0,0])
-        # vx = (TARGET_POS[i,0]-current_state[0])/2
-        # vy = (TARGET_POS[i,1]-current_state[1])/2
-        # vz = (TARGET_POS[i,2]-current_state[2])/2
-        # x_ref = np.array([TARGET_POS[i,0], TARGET_POS[i,1],TARGET_POS[i,2], vx,vy,vz ,0,0,0 ,0,0,0])
-        # x_ref = np.array([0,0,1, 0,0,0, 0,0,1, 0,0,0])
+        trajectory[i] = [x_ref[0], x_ref[1], x_ref[2]]
+        
+        # Let po spirale
+        # x_ref = np.array([np.cos(i/elipse_step),np.sin(i/elipse_step),INIT_XYZS[0,2]+i/120, -np.sin(i/elipse_step)*(1/elipse_step),np.cos(i/elipse_step)*(1/elipse_step),0 ,0,0,0 ,0,0,0])
+        # x_ref = np.array([np.cos(i/t_sim),np.sin(i/t_sim),INIT_XYZS[0,2]+i/120, -np.sin(i/t_sim)*(1/t_sim),np.cos(i/t_sim)*(1/t_sim),0 ,0,0,0 ,0,0,0])
+        # trajectory[i] = [x_ref[0], x_ref[1], x_ref[2]]
 
         print("cilovy stav: ", x_ref)
         print("vstupy: ", action[0,:])
-        
 
-        #### Go to the next way point and loop #####################
-        # for j in range(num_drones):
-        #     wp_counters[j] = wp_counters[j] + 1 if wp_counters[j] < (NUM_WP-1) else 0
-        #     # x_ref[0:3] = TARGET_POS[wp_counters[j]]
-        #     # x_ref[2] = INIT_XYZS[0,2]
-        #     x_ref = np.array([TARGET_POS[wp_counters[j],0], TARGET_POS[wp_counters[j],1],TARGET_POS[wp_counters[j],2], 0,0,0 ,0,0,0 ,0,0,0])
+        #### Step the simulation ###################################
+        for j in range(segment):
+            u_interp = np.array([u1[j], u2[j], u3[j], u4[j]])
+            action[0,:] = np.sqrt(np.abs(u_interp/C_T2))
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            #### Log the simulation ####################################
+            logger.log(drone=0,
+                       timestamp=i/env.CTRL_FREQ,
+                       state=obs[0],
+                       control=np.hstack([TARGET_POS[wp_counters[0], 0:2], INIT_XYZS[0, 2], INIT_RPYS[0, :], np.zeros(6)])
+                       # control=np.hstack([INIT_XYZS[j, :]+TARGET_POS[wp_counters[j], :], INIT_RPYS[j, :], np.zeros(6)])
+                       )
+
+            #### Printout ##############################################
+            env.render()
+
+            #### Sync the simulation ###################################
+            if gui:
+                sync(i, START, env.CTRL_TIMESTEP)
 
         ### Změna stavu...nové x0 pro další výpočet MPC
         state = env._getDroneStateVector(0)
         new_xyz = state[0:3]
         new_vxvyvz = state[10:13]
         new_phithetapsi = state[7:10]
-        # new_phithetapsi = p.getEulerFromQuaternion(state[3:7])
         new_pqr = state[13:16]
         ocp.x00[0][0:3] = new_xyz
         ocp.x00[0][3:6] = new_vxvyvz
         ocp.x00[0][6:9] = new_phithetapsi
         ocp.x00[0][9:12] = new_pqr
-        # ocp.x00[0] = current_state
-        # ocp.u00[0] = action[0,:]
         print("akt. stav: ", new_xyz)
-        # env.state
-        
-
-        #### Log the simulation ####################################
-        for j in range(num_drones):
-            logger.log(drone=j,
-                       timestamp=i/env.CTRL_FREQ,
-                       state=obs[j],
-                       control=np.hstack([TARGET_POS[wp_counters[j], 0:2], INIT_XYZS[j, 2], INIT_RPYS[j, :], np.zeros(6)])
-                       # control=np.hstack([INIT_XYZS[j, :]+TARGET_POS[wp_counters[j], :], INIT_RPYS[j, :], np.zeros(6)])
-                       )
 
         #### Printout ##############################################
         env.render()
@@ -408,20 +626,26 @@ def run(
         #### Sync the simulation ###################################
         if gui:
             sync(i, START, env.CTRL_TIMESTEP)
+        
 
     #### Close the environment #################################
     print("hotovo")
     env.close()
 
-    #### Save the simulation results ###########################
-    logger.save()
-    logger.save_as_csv("pid") # Optional CSV save
+    # #### Save the simulation results ###########################
+    # logger.save()
+    # logger.save_as_csv("pid") # Optional CSV save
 
-    #### Plot the simulation results ###########################
-    if plot:
-        logger.plot()
+    # #### Plot the simulation results ###########################
+    # if plot:
+    #     logger.plot()
 
-    # print("hotovo")
+    #### Vykreslí simulaci letu do bodu
+    printPointFlight(logger, INIT_XYZS, x_ref, J, duration_sec, segment)
+
+    #### Vykreslí simulaci letu po trajektorii
+    # trajectory = trajectory.T
+    # printTrajectoryFlight(logger,INIT_XYZS, trajectory, J, duration_sec, segment)
 
 if __name__ == "__main__":
     #### Define and parse (optional) arguments for the script ##

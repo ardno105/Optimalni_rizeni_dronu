@@ -5,20 +5,20 @@ import matplotlib.pyplot as plt
 # =============================================================================
 # Parametry
 # =============================================================================
-C_T = 1.28192e-8      # koeficient tahu rotoru
-C_M = 5.964552e-3     # koeficient momentu rotoru
-rad_max = (2 * np.pi * 64 * 200) / 60  # maximální otáčky [rad/s]
-rad_min = (2 * np.pi * 64 * 18) / 60     # minimální otáčky [rad/s]
-rpm_max = rad_max * 9.5492968            # maximální otáčky [rpm]
-rpm_min = rad_min * 9.5492968            # minimální otáčky [rpm]
+# C_T = 1.28192e-8      # koeficient tahu rotoru
+# C_M = 5.964552e-3     # koeficient momentu rotoru
+C_T2 = 3.16e-10      # koeficient tahu rotoru pro přepočet na rpm
+C_M2 = 7.94e-12     # koeficient momentu rotoru
+# C_T_test = 1e-5
+f_min = 0
+f_max = 0.15
 arm_length = 0.0397     # délka ramene [m]
 
 g = 9.81       # tíhové zrychlení [m/s²]
-m = 0.03       # hmotnost dronu [kg]
-Ix = 1.395e-5  # moment setrvačnosti kolem osy x [kg·m²]
-Iy = 1.436e-6  # moment setrvačnosti kolem osy y [kg·m²]
-Iz = 2.173e-6  # moment setrvačnosti kolem osy z [kg·m²]
-
+m = 0.027       # hmotnost dronu [kg]
+Ix = 1.4e-5  # moment setrvačnosti kolem osy x [kg·m²]
+Iy = 1.4e-5  # moment setrvačnosti kolem osy y [kg·m²]
+Iz = 2.17e-5  # moment setrvačnosti kolem osy z [kg·m²]
 Ts = 1e-3    # perioda vzorkování [s]
 
 # Limity tahu
@@ -29,6 +29,8 @@ f_min = 0.0
 tau_max = f_max * arm_length
 tau_min = -tau_max
 
+pwm_max = 65535
+rpm_max = 0.2685*pwm_max + 4070.3            # maximální otáčky [rpm]
 # =============================================================================
 # Definice stavu, vstupu a dynamiky pomocí CasADi
 # =============================================================================
@@ -38,14 +40,6 @@ n_controls = 4
 
 x = ca.SX.sym('x', n_states)
 u = ca.SX.sym('u', n_controls)  # vstup: jednotlivé tahy rotorů [f1, f2, f3, f4]
-
-# Celkový tah
-F = u[0] + u[1] + u[2] + u[3]
-
-# Výpočet momentů:
-tau_phi = arm_length * (u[3] - u[1])                    # - Roll (phi): tau_phi = arm_length*(f4 - f2)
-tau_theta = arm_length * (u[2] - u[0])                  # - Pitch (theta): tau_theta = arm_length*(f3 - f1)
-tau_psi = (C_M / C_T) * (u[0] - u[1] + u[2] - u[3])     # - Yaw (psi): tau_psi = (C_M/C_T)*(f1 - f2 + f3 - f4)
 
 # Definice stavových veličin
 pos = x[0:3]      # poloha: [x, y, z]
@@ -57,20 +51,23 @@ p     = x[9]      # úhlová rychlost kolem x
 q     = x[10]     # úhlová rychlost kolem y
 r     = x[11]     # úhlová rychlost kolem z
 
-# Převod síly z tělesového souřadnicového systému do inercního (světového)
-#   F_world = [cos(phi)*sin(theta)*cos(psi) + sin(phi)*sin(psi),
-#              cos(phi)*sin(theta)*sin(psi) - sin(phi)*cos(psi),
-#              cos(phi)*cos(theta)] * F
+# CF2P
+F = C_T2*(u[0]**2 + u[1]**2 + u[2]**2 + u[3]**2)
+tau_phi   = C_T2*(arm_length/np.sqrt(2)) * (u[1]**2 - u[3]**2)
+tau_theta = C_T2*(arm_length/np.sqrt(2)) * (-u[0]**2 + u[2]**2)
+tau_psi   = C_M2 * (-u[0]**2 + u[1]**2 - u[2]**2 + u[3]**2)
+
+# Rotace dle Eulerových úhlů
 fx = (F/m) * (ca.cos(phi)*ca.sin(theta)*ca.cos(psi) + ca.sin(phi)*ca.sin(psi))
 fy = (F/m) * (ca.cos(phi)*ca.sin(theta)*ca.sin(psi) - ca.sin(phi)*ca.cos(psi))
 fz = (F/m) * (ca.cos(phi)*ca.cos(theta)) - g
 
-# Kinematika eulerových úhlů:
+# Kinematika Eulerových úhlů
 phi_dot   = p + q * ca.sin(phi) * ca.tan(theta) + r * ca.cos(phi) * ca.tan(theta)
 theta_dot = q * ca.cos(phi) - r * ca.sin(phi)
 psi_dot   = q * ca.sin(phi) / ca.cos(theta) + r * ca.cos(phi) / ca.cos(theta)
 
-# Dynamika otáčení:
+# Dynamika otáčení
 p_dot = (tau_phi - (Iy - Iz) * q * r) / Ix
 q_dot = (tau_theta - (Iz - Ix) * p * r) / Iy
 r_dot = (tau_psi - (Ix - Iy) * p * q) / Iz
@@ -100,7 +97,7 @@ integrator = ca.integrator('integrator', 'rk', dae, opts)
 # =============================================================================
 # Simulace trajektorie při libovolném konstantním vstupu
 # =============================================================================
-sim_time = 2.0               # délka simulace [s]
+sim_time = 1.0               # délka simulace [s]
 N_sim = int(sim_time / Ts)   # počet simulačních kroků
 
 # Počáteční stav: dron v klidu, na zemi (poloha 0, rychlost 0, úhly 0)
@@ -109,7 +106,7 @@ x0 = np.zeros(n_states)
 # Vstup: 
 u_max_input = 0.15  
 # u_sim = np.array([u_max_input, u_max_input, u_max_input, u_max_input])    # konstantní maximální tah u každého rotoru (tj. 0.15 N)
-u_sim = np.array([u_max_input, 0, 0, u_max_input])      # libovolný vstup
+u_sim = np.array([rpm_max, 0, rpm_max, 0])      # libovolný vstup
 
 # Uložení historie stavu
 state_history = np.zeros((N_sim + 1, n_states))
@@ -162,3 +159,16 @@ ax.set_ylabel('y [m]')
 ax.set_zlabel('z [m]')
 ax.set_title('3D trajektorie dronu')
 plt.show()
+
+plt.subplot(1,3,1)
+plt.plot(state_history[:, 6])
+plt.title("Phi")
+plt.xlabel("Time, s")
+plt.subplot(1,3,2)
+plt.plot(state_history[:, 7])
+plt.title("Theta")
+plt.xlabel("Time, s")
+plt.subplot(1,3,3)
+plt.plot(state_history[:, 8])
+plt.title("Psi")
+plt.xlabel("Time, s")
